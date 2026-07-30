@@ -1,5 +1,7 @@
 # CORDIC vs. Minimax: Fixed-Point sin/cos on an 8-bit AVR
 
+**▶ Video walkthrough:** [CORDIC vs Polynomial Approximations (ATxmega128A1U)](https://www.youtube.com/watch?v=R24hkTT0TFQ)
+
 How do you compute sin/cos on a microcontroller with no FPU? This project implements and
 measures two answers on an ATxmega128A1U (8-bit AVR: add/sub/shift and a hardware 8×8→16
 `MUL`, nothing else):
