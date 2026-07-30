@@ -1,0 +1,20 @@
+# Build output
+firmware/build/
+*.o
+*.d
+*.elf
+*.hex
+*.map
+*.lss
+
+# Manim render output
+manim/media/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# OS
+Thumbs.db
+.DS_Store

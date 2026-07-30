@@ -1,0 +1,1334 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Computing sin/cos on the ATxmega128A1U</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html{scrollbar-width:none}
+html::-webkit-scrollbar{display:none}
+:root{
+  --bg:#000000;--bg2:#0a0a0a;--bg3:#181818;--bg4:#222222;
+  --tx:#e0e0e0;--tx2:#888888;--bd:#2a2a2a;
+  --cordic:#58c4dd;--taylor:#fc6255;--minimax:#83c167;
+  --ref:#e8c547;--accent:#b4a7d6;--grid:#333333;
+  --serif:Cambria,'Palatino Linotype','Book Antiqua',serif;
+  --sans:'Segoe UI',system-ui,sans-serif;
+  --mono:'Cascadia Code',Consolas,monospace;
+}
+html{font-family:var(--sans);background:var(--bg);color:var(--tx);font-size:16px;scroll-behavior:smooth}
+body{max-width:1400px;margin:0 auto;padding:0 2.5rem 6rem}
+
+section{padding:6rem 0 2rem;display:flex;flex-direction:column}
+section:first-of-type{min-height:100vh;justify-content:center}
+h1{font-family:var(--serif);font-size:2.6rem;font-weight:normal;letter-spacing:.01em;color:#fff}
+h2{font-family:var(--serif);font-size:1.8rem;font-weight:normal;margin-bottom:.4rem;color:#fff}
+h3{font-size:.95rem;font-weight:600;text-transform:uppercase;letter-spacing:.08em;margin:3.5rem 0 .6rem;color:var(--tx2)}
+.sub{color:var(--tx2);font-size:1.05rem;margin-top:.5rem}
+p.cap{color:var(--tx2);font-size:.9rem;margin-bottom:1.8rem;max-width:900px;line-height:1.65}
+.note{color:var(--tx2);font-size:.85rem;margin-top:2rem;max-width:600px;line-height:1.5}
+.note b{color:var(--ref);font-weight:600}
+.data-tbl{border-collapse:collapse;margin:1.5rem 0;width:100%;max-width:900px;font-size:.9rem}
+.data-tbl th{text-align:left;padding:.6rem 1rem;border-bottom:2px solid var(--bd);color:var(--tx);font-weight:600}
+.data-tbl td{padding:.6rem 1rem;border-bottom:1px solid var(--bg3);color:var(--tx2);line-height:1.5;vertical-align:top}
+.data-tbl tr:last-child td{border-bottom:none}
+.data-tbl td:first-child{font-weight:600;white-space:nowrap}
+
+canvas{display:block;background:transparent;border:none;max-width:100%}
+.viz{width:fit-content;margin:0 auto;max-width:100%}
+
+.ctrl{display:flex;align-items:center;gap:.3rem;padding:.2rem .4rem;border:none;margin-top:.3rem;opacity:.15;transition:opacity .3s}
+.ctrl:hover{opacity:.7}
+.ctrl button{background:transparent;border:1px solid rgba(255,255,255,.06);color:var(--tx2);padding:.2rem .45rem;border-radius:2px;cursor:pointer;font-size:.75rem;font-family:var(--sans);min-width:1.6em;text-align:center;transition:all .15s}
+.ctrl button:hover{color:var(--tx);border-color:rgba(255,255,255,.2)}
+.ctrl button.active{background:var(--accent);color:var(--bg);border-color:var(--accent)}
+.ctrl .lbl{font-family:var(--mono);font-size:.7rem;color:var(--tx2);opacity:.6}
+.ctrl .sep{width:1px;height:14px;background:rgba(255,255,255,.06);margin:0 .1rem}
+.ctrl input[type=range]{accent-color:var(--accent);height:2px;opacity:.5}
+.ctrl input[type=range]:hover{opacity:1}
+
+.plot-grid{display:grid;grid-template-columns:1fr 1fr;gap:2rem;margin:1.5rem 0}
+.code-grid{display:grid;grid-template-columns:1fr;gap:2rem;margin:1.5rem 0}
+@media(max-width:900px){.plot-grid,.code-grid{grid-template-columns:1fr}}
+pre.code-block{background:var(--bg3);border:none;border-radius:4px;padding:1.25rem 1.5rem;overflow-x:auto;font-family:var(--mono);font-size:.8rem;line-height:1.7;tab-size:4;white-space:pre;color:var(--tx)}
+.ck{color:var(--accent)}.ct{color:var(--cordic)}.cn{color:var(--ref)}.cc{color:var(--tx2);font-style:italic}.cf{color:#58c4dd}.cp{color:var(--taylor)}
+
+#fp-box{display:flex;flex-direction:column;align-items:center;gap:1.25rem;margin:1.5rem 0}
+.bit-row{display:flex;gap:2px;justify-content:center}
+.bit-cell{width:34px;height:40px;display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:.85rem;font-weight:600;border-radius:2px;transition:background .15s}
+.bit-cell.sign{background:rgba(252,98,85,.1);border:1px solid rgba(252,98,85,.3)}
+.bit-cell.int{background:rgba(232,197,71,.1);border:1px solid rgba(232,197,71,.3)}
+.bit-cell.frac{background:rgba(88,196,221,.1);border:1px solid rgba(88,196,221,.3)}
+.fp-controls{display:flex;gap:1.5rem;align-items:center;flex-wrap:wrap}
+.fp-controls label{display:flex;align-items:center;gap:.5rem;font-size:.85rem;color:var(--tx2)}
+.fp-controls select,.fp-controls input[type=range]{accent-color:var(--accent);font-family:var(--mono);background:var(--bg4);color:var(--tx);border:1px solid rgba(255,255,255,.08);border-radius:2px;padding:.2rem .4rem}
+.fp-val{font-family:var(--mono);font-size:.95rem;color:var(--tx);text-align:center;margin:.5rem 0}
+.fp-legend{display:flex;gap:1.5rem;font-size:.8rem;color:var(--tx2)}
+.fp-legend span{display:flex;align-items:center;gap:.4rem}
+.fp-legend .dot{width:9px;height:9px;border-radius:2px}
+
+.hero{text-align:center;justify-content:center;align-items:center;min-height:100vh}
+.hero h1{font-size:2.8rem}
+.chip{display:inline-block;padding:.3rem .8rem;margin-top:1rem;font-family:var(--mono);font-size:.8rem;color:var(--tx2);letter-spacing:.02em}
+
+.formula{background:var(--bg2);border-left:2px solid var(--accent);padding:1rem 1.5rem;margin:1.2rem 0 1.8rem;font-family:var(--serif);font-size:1.05rem;line-height:2;color:var(--tx);overflow-x:auto}
+.formula .eq-line{display:block;padding-left:1.5rem;text-indent:-1.5rem}
+.formula .eq-label{color:var(--tx2);font-size:.85rem;font-family:var(--sans);display:block;margin-bottom:.3rem}
+.formula .eq-note{color:var(--tx2);font-size:.85rem;font-family:var(--sans);margin-top:.4rem;display:block}
+</style>
+</head>
+<body>
+
+<section class="hero">
+  <h1>Computing sin/cos with No FPU</h1>
+</section>
+
+<section id="s-problem">
+  <h2>The Problem</h2>
+  <p class="cap">Given an angle, return sin and cos using only add, subtract, shift, and an 8&times;8 hardware multiply.</p>
+  <div class="viz">
+    <canvas id="c-circle"></canvas>
+  </div>
+</section>
+
+<section id="s-fp">
+  <h2>Fixed-Point Representation</h2>
+  <div id="fp-box"></div>
+  <div class="viz"><canvas id="c-quant"></canvas></div>
+</section>
+
+<section id="s-lut">
+  <h2>The Lookup Table</h2>
+  <p class="cap">Precompute sin values, store in flash, interpolate between neighbors. Eats memory; interpolation still costs a multiply.</p>
+  <div class="viz"><canvas id="c-lut"></canvas></div>
+</section>
+
+<section id="s-cordic">
+  <h2>CORDIC</h2>
+  <p class="cap">Rotate a vector toward the target angle using only shifts and adds. Each rotation angle has tan(&alpha;) = 2<sup>&minus;i</sup>, so the multiply is a bit shift.</p>
+  <div class="formula">
+    <span class="eq-label">CORDIC iteration (rotation mode)</span>
+    <span class="eq-line">x<sub>i+1</sub> = x<sub>i</sub> &minus; d<sub>i</sub> &middot; y<sub>i</sub> &middot; 2<sup>&minus;i</sup></span>
+    <span class="eq-line">y<sub>i+1</sub> = y<sub>i</sub> + d<sub>i</sub> &middot; x<sub>i</sub> &middot; 2<sup>&minus;i</sup></span>
+    <span class="eq-line">z<sub>i+1</sub> = z<sub>i</sub> &minus; d<sub>i</sub> &middot; arctan(2<sup>&minus;i</sup>)</span>
+    <span class="eq-note">where d<sub>i</sub> = sign(z<sub>i</sub>), &ensp; init: x<sub>0</sub> = 1/K, &ensp; y<sub>0</sub> = 0, &ensp; z<sub>0</sub> = &theta;</span>
+  </div>
+  <div class="plot-grid" style="grid-template-columns:1.4fr 1fr;align-items:start">
+    <div class="viz">
+      <canvas id="c-cordic"></canvas>
+    </div>
+    <div class="viz"><canvas id="c-conv"></canvas></div>
+  </div>
+
+  <h3>The Gain Constant K</h3>
+  <p class="cap">Each pseudo-rotation scales the vector by &radic;(1 + 2<sup>&minus;2i</sup>). The product K &asymp; 1.647 is angle-independent. Pre-divide once, no per-iteration multiply.</p>
+  <div class="formula">
+    <span class="eq-line">K = &prod;<sub>i=0</sub><sup>n&minus;1</sup> &radic;(1 + 2<sup>&minus;2i</sup>) &ensp;&asymp;&ensp; 1.64676</span>
+    <span class="eq-line">1/K &ensp;&asymp;&ensp; 0.60725</span>
+    <span class="eq-note">K is constant for a given iteration count; computed once offline, applied as prescale to x<sub>0</sub></span>
+  </div>
+  <div class="viz"><canvas id="c-kfact"></canvas></div>
+
+  <p class="note"><b>Note:</b> CORDIC eliminates the sine table but still needs a small atan(2<sup>&minus;i</sup>) table (~FRAC_BITS entries).</p>
+</section>
+
+<section id="s-poly">
+  <h2>Polynomial Approximation</h2>
+  <p class="cap">sin(x) is an analytic function. Near any point, it equals its own Taylor series: an infinite sum of terms built from derivatives at that point. Truncate the series to a finite number of terms and you get a polynomial that approximates sin(x) over a limited interval.</p>
+  <div class="formula">
+    <span class="eq-label">Taylor series for sine</span>
+    <span class="eq-line">sin(x) = x &minus; x<sup>3</sup>/3! + x<sup>5</sup>/5! &minus; x<sup>7</sup>/7! + &hellip; &ensp;=&ensp; &sum;<sub>k=0</sub><sup>&infin;</sup> (&minus;1)<sup>k</sup> x<sup>2k+1</sup> / (2k+1)!</span>
+  </div>
+  <div class="formula">
+    <span class="eq-label">Taylor series for cosine</span>
+    <span class="eq-line">cos(x) = 1 &minus; x<sup>2</sup>/2! + x<sup>4</sup>/4! &minus; x<sup>6</sup>/6! + &hellip; &ensp;=&ensp; &sum;<sub>k=0</sub><sup>&infin;</sup> (&minus;1)<sup>k</sup> x<sup>2k</sup> / (2k)!</span>
+  </div>
+  <p class="cap">Each additional term extends the interval of useful accuracy. The first term alone, sin(x) &asymp; x, is good near zero. Adding the cubic correction captures curvature. Adding the fifth-degree term pushes the approximation further from the origin.</p>
+
+  <h3>Argument Reduction</h3>
+  <p class="cap">Polynomials approximate well only on a bounded interval. But angles span 0 to 2&pi;. Argument reduction folds any angle into the first octant [0, &pi;/4] using symmetry: sin(&pi; &minus; x) = sin(x), cos(&pi;/2 &minus; x) = sin(x), and so on. The polynomial only needs to be accurate on that narrow interval. Wider would require more terms.</p>
+
+  <h3>Horner Evaluation</h3>
+  <p class="cap">Evaluating x &minus; x<sup>3</sup>/6 + x<sup>5</sup>/120 naively requires computing each power of x independently. Horner's method restructures the polynomial to nest multiplications. One multiply and one add per term, evaluated inside-out. Optimal for hardware with a fast multiplier.</p>
+  <div class="formula">
+    <span class="eq-label">Horner form (odd polynomial for sine, u = x&sup2;)</span>
+    <span class="eq-line">sin(x) = x &middot; (c<sub>0</sub> + u &middot; (c<sub>1</sub> + u &middot; (c<sub>2</sub> + &hellip;)))</span>
+    <span class="eq-note">n coefficients &rarr; n multiplies total (n&minus;1 Horner steps + final x&middot;r)</span>
+  </div>
+  <div class="viz">
+    <canvas id="c-horner"></canvas>
+  </div>
+
+  <h3>Convergence</h3>
+  <p class="cap">Watch additional terms being added. Each term bends the polynomial closer to the true curve, starting from the center and extending outward.</p>
+  <div class="viz">
+    <canvas id="c-poly"></canvas>
+  </div>
+
+  <h3>Taylor vs. Minimax: Where the Error Goes</h3>
+  <p class="cap">Taylor coefficients come from derivatives at the origin. The approximation is exact there and degrades toward the interval boundary. Minimax coefficients are computed by the Remez exchange algorithm to minimize the worst-case error across the entire interval. The result equioscillates: the error ripples uniformly rather than ramping up at the edges. For the same number of terms, minimax has a smaller worst-case error.</p>
+  <div class="formula">
+    <span class="eq-label">Taylor coefficients (from derivatives)</span>
+    <span class="eq-line">c<sub>k</sub> = (&minus;1)<sup>k</sup> / (2k+1)! &ensp;&rArr;&ensp; c<sub>0</sub> = 1, &ensp; c<sub>1</sub> = &minus;1/6, &ensp; c<sub>2</sub> = 1/120, &ensp; c<sub>3</sub> = &minus;1/5040</span>
+  </div>
+  <div class="formula">
+    <span class="eq-label">Minimax coefficients (Remez exchange)</span>
+    <span class="eq-line">minimize &ensp; max<sub>x&thinsp;&in;&thinsp;[0,&thinsp;&pi;/4]</sub> | sin(x) &minus; x &middot; P(x&sup2;) |</span>
+    <span class="eq-note">Equioscillation theorem: optimal P* has error that oscillates at equal magnitude across interval</span>
+  </div>
+  <div class="plot-grid">
+    <div class="viz"><canvas id="c-errband-taylor"></canvas></div>
+    <div class="viz"><canvas id="c-errband-minimax"></canvas></div>
+  </div>
+
+</section>
+
+<section id="s-impl">
+  <h2>Implementation</h2>
+  <h3>Fixed-Point Multiply</h3>
+  <div class="formula">
+    <span class="eq-line">a &times; b &ensp;=&ensp; (a<sub>raw</sub> &times; b<sub>raw</sub>) &gt;&gt; FRAC_BITS</span>
+    <span class="eq-note">Requires a (2&times;TOTAL_BITS)-wide intermediate; on 8-bit AVR, a 16&times;16 multiply decomposes into 4 hardware MUL instructions, 32&times;32 into 16</span>
+  </div>
+  <pre class="code-block" id="code-mul"></pre>
+  <div class="code-grid">
+    <div><h3>CORDIC</h3><pre class="code-block" id="code-cordic"></pre></div>
+    <div><h3>Horner</h3><pre class="code-block" id="code-poly"></pre></div>
+  </div>
+</section>
+
+<section id="s-compare">
+  <h2>Measured Comparison</h2>
+  <p class="cap">Cycle counts via timer capture at three fixed-point widths.</p>
+  <div class="plot-grid" style="gap:3rem;margin-bottom:3rem">
+    <div><h3>Cycles vs. Width</h3><div id="svg-cycles"></div></div>
+    <div><h3>Accuracy vs. Bits</h3><div id="svg-acc"></div></div>
+  </div>
+  <div class="plot-grid" style="gap:3rem">
+    <div><h3>Per-Operation Cost</h3><div id="svg-opcost"></div></div>
+    <div><h3>Operation Count</h3><div id="svg-opcnt"></div></div>
+  </div>
+  <p class="note">Extrapolated from three measured widths, not directly observed.</p>
+</section>
+
+<section id="s-interpret">
+  <h2>Interpretation</h2>
+
+  <h3>What the Data Shows</h3>
+  <p class="cap">Minimax polynomial evaluation is fastest at every width tested. CORDIC is competitive at 16-bit but falls behind at both extremes. Taylor trails minimax consistently due to extra terms for equivalent accuracy.</p>
+  <p class="cap">All three algorithms scale roughly quadratically with limb count, but the mechanisms differ. Polynomial cost is dominated by the fixed-point multiply, which grows as O(L<sup>2</sup>) on schoolbook hardware. CORDIC cost is the product of iteration count (linear in precision bits) and per-iteration shift-add cost (linear in limbs), also yielding near-quadratic growth but with a larger constant.</p>
+  <p class="cap">CORDIC accuracy plateaus at 4-5 LSB error across all widths, an inherent limitation of finite-iteration shift-add rounding. Both polynomial methods achieve &#177;1 LSB, limited only by the final fixed-point truncation.</p>
+
+  <h3>When to Use Each</h3>
+  <table class="data-tbl">
+    <thead>
+      <tr><th>Algorithm</th><th>Best When</th><th>Weakness</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td style="color:#58c4dd">CORDIC</td>
+        <td>No hardware multiplier. Shift and add are the only fast operations. Common on minimal FPGA softcores and older 4-bit/8-bit MCUs without MUL.</td>
+        <td>On a chip with MUL, the iteration overhead exceeds the multiply cost it was designed to avoid. Accuracy limited to ~log<sub>2</sub>(iterations) bits.</td>
+      </tr>
+      <tr>
+        <td style="color:#fc6255">Taylor</td>
+        <td>Prototyping or teaching. Coefficients are well-known and easy to derive. Reasonable when code clarity matters more than last-cycle performance.</td>
+        <td>More terms than minimax for equivalent accuracy. At narrow widths the extra term is one more multiply; at wide widths, each multiply is expensive.</td>
+      </tr>
+      <tr>
+        <td style="color:#83c167">Minimax</td>
+        <td>Any chip with hardware MUL and a need for speed or accuracy. Fewest terms for a given error bound. Optimal for production fixed-point code.</td>
+        <td>Coefficients are not closed-form; must be computed offline via Remez exchange. Harder to verify by hand than Taylor.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>The Hardware Multiplier Changes Everything</h3>
+  <p class="cap">CORDIC was invented for hardware that could only shift and add. The ATxmega128A1U has a single-cycle 8&#215;8 hardware MUL. That one instruction makes polynomial evaluation viable and fast, negating CORDIC's core advantage. On a hypothetical xmega without MUL, every fixed-point multiply would become a shift-add loop, and the cost ranking would likely invert.</p>
+  <p class="cap">The scaling data confirms this: per-operation cost for polynomial terms (dominated by multiply) grows steeply with width, while CORDIC per-iteration cost (shift-add) grows more gently. At 8-bit where MUL is a single instruction, polynomials win easily. At 32-bit where MUL becomes multi-limb software, the gap between CORDIC and polynomial narrows, but CORDIC's 30-iteration count still makes it slowest overall.</p>
+</section>
+
+<!-- ============================================================ -->
+<script>
+// ============================================================
+// UTILITIES
+// ============================================================
+const PI = Math.PI, TAU = 2*PI, sin=Math.sin, cos=Math.cos, abs=Math.abs,
+      atan=Math.atan, sqrt=Math.sqrt, pow=Math.pow, log10=Math.log10,
+      floor=Math.floor, round=Math.round, max=Math.max, min=Math.min;
+
+function $(id){return document.getElementById(id)}
+function el(tag,cls,parent){const e=document.createElement(tag);if(cls)e.className=cls;if(parent)parent.appendChild(e);return e}
+
+function initCanvas(id,w,h){
+  const c=$(id),dpr=devicePixelRatio||1;
+  c.width=w*dpr;c.height=h*dpr;c.style.width=w+'px';c.style.height=h+'px';
+  const ctx=c.getContext('2d');ctx.scale(dpr,dpr);
+  return{c,ctx,w,h};
+}
+
+const C={
+  bg:'#000000',grid:'#333333',axis:'#555555',tx:'#e0e0e0',tx2:'#888888',
+  cordic:'#58c4dd',taylor:'#fc6255',minimax:'#83c167',ref:'#e8c547',accent:'#b4a7d6',
+  line(ctx,x1,y1,x2,y2){ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke()},
+  arrow(ctx,x1,y1,x2,y2,hl){
+    hl=hl||8;const a=Math.atan2(y2-y1,x2-x1);
+    ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(x2,y2);
+    ctx.lineTo(x2-hl*cos(a-.4),y2-hl*sin(a-.4));
+    ctx.lineTo(x2-hl*cos(a+.4),y2-hl*sin(a+.4));ctx.closePath();ctx.fill();
+  },
+  dot(ctx,x,y,r){ctx.beginPath();ctx.arc(x,y,r||4,0,TAU);ctx.fill()},
+  txt(ctx,s,x,y,o){
+    o=o||{};ctx.save();
+    ctx.font=o.font||'14px system-ui,sans-serif';ctx.fillStyle=o.color||C.tx;
+    ctx.textAlign=o.align||'left';ctx.textBaseline=o.base||'middle';
+    ctx.fillText(s,x,y);ctx.restore();
+  }
+};
+
+function clear(ctx,w,h){ctx.fillStyle=C.bg;ctx.fillRect(0,0,w,h)}
+function ease(t){return t<.5?4*t*t*t:1-pow(-2*t+2,3)/2}
+function lerp(a,b,t){return a+(b-a)*t}
+function glow(ctx,color,blur){ctx.shadowColor=color;ctx.shadowBlur=blur}
+function noGlow(ctx){ctx.shadowColor='transparent';ctx.shadowBlur=0}
+
+// ============================================================
+// ANIMATION CONTROLLER
+// ============================================================
+class Anim{
+  constructor(o){
+    this.cv=o.canvas;this.ctx=o.ctx;this.W=o.w;this.H=o.h;
+    this.N=o.steps;this.t=0;this.spd=o.speed||1;this.loop=o.loop!==false;
+    this.draw=o.render;this.playing=false;this.raf=null;this.last=0;
+    this.userPaused=false;this.visible=false;
+    if(o.controls!==false)this._ui(o.container);
+    this._render();
+    this._observe();
+  }
+  _ui(parent){
+    if(!parent)return;
+    const btn=(t,fn)=>{const b=el('button');b.textContent=t;b.onclick=fn;return b};
+    this.bp=btn('▶',()=>this._toggle());
+    const br=btn('↺',()=>this.reset());
+    [this.bp,br].forEach(e=>parent.appendChild(e));
+  }
+  _observe(){
+    const io=new IntersectionObserver(entries=>{
+      for(const e of entries){
+        this.visible=e.isIntersecting;
+        if(e.isIntersecting){
+          if(!this.userPaused&&!this.playing&&!(this.t>=this.N&&!this.loop))this.play();
+        }else{
+          if(this.playing){this.pause();this.userPaused=false}
+        }
+      }
+    },{threshold:0.2});
+    io.observe(this.cv);
+  }
+  _render(){this.draw(this.ctx,this.t,this.W,this.H)}
+  _toggle(){
+    if(this.playing){this.userPaused=true;this.pause()}
+    else{this.userPaused=false;if(this.t>=this.N&&!this.loop){this.t=0}this.play()}
+  }
+  play(){this.playing=true;if(this.bp)this.bp.textContent='⏸';this.last=performance.now();this.raf=requestAnimationFrame(()=>this._tick())}
+  pause(){this.playing=false;if(this.bp)this.bp.textContent='▶';if(this.raf){cancelAnimationFrame(this.raf);this.raf=null}}
+  reset(){this.t=0;this.userPaused=false;this.pause();this._render()}
+  seek(v){this.t=max(0,min(this.N,v));this._render()}
+  _tick(){
+    if(!this.playing)return;
+    const now=performance.now(),dt=min((now-this.last)/1000,0.05);this.last=now;
+    this.t+=dt*this.spd;
+    if(this.t>this.N+this.spd*1.5){if(this.loop){this.t=0}else{this.t=this.N;this._render();this.pause();return}}
+    this._render();this.raf=requestAnimationFrame(()=>this._tick());
+  }
+}
+
+// scroll-to-adjust on range inputs — only when cursor rests on slider
+document.addEventListener('mouseenter',e=>{
+  if(e.target.tagName!=='INPUT'||e.target.type!=='range')return;
+  e.target._hoverTimer=setTimeout(()=>{e.target._scrollReady=true},150);
+},{capture:true});
+document.addEventListener('mouseleave',e=>{
+  if(e.target.tagName!=='INPUT'||e.target.type!=='range')return;
+  clearTimeout(e.target._hoverTimer);e.target._scrollReady=false;
+},{capture:true});
+document.addEventListener('wheel',e=>{
+  const t=e.target;
+  if(t.tagName!=='INPUT'||t.type!=='range'||!t._scrollReady)return;
+  e.preventDefault();
+  const s=+(t.step)||1;
+  t.value=+(t.value)+(e.deltaY<0?s:-s);
+  t.dispatchEvent(new Event('input'));
+},{passive:false});
+
+// ============================================================
+// SECTION 1: UNIT CIRCLE → SINE WAVE
+// ============================================================
+function initUnitCircle(){
+  const{ctx,w,h}=initCanvas('c-circle',1350,500);
+  new Anim({canvas:$('c-circle'),ctx,w,h,steps:1e9,speed:60,loop:false,
+    render(ctx,step,W,H){
+      clear(ctx,W,H);
+      const cx=230,cy=240,r=180;
+      const wx0=520,wx1=W-40,ww=wx1-wx0;
+      const ang=((step%360)/360)*TAU;
+      // axes
+      ctx.strokeStyle=C.grid;ctx.lineWidth=1;
+      C.line(ctx,cx-r-20,cy,cx+r+20,cy);C.line(ctx,cx,cy-r-20,cx,cy+r+20);
+      // circle
+      ctx.strokeStyle=C.axis;ctx.lineWidth=1.5;
+      ctx.beginPath();ctx.arc(cx,cy,r,0,TAU);ctx.stroke();
+      // angle arc
+      if(ang>.01){ctx.strokeStyle=C.ref+'88';ctx.lineWidth=1.5;
+        ctx.beginPath();ctx.arc(cx,cy,35,0,-ang,true);ctx.stroke();
+        C.txt(ctx,'θ',cx+42*cos(-ang/2),cy+42*sin(-ang/2)-4,{font:'13px sans-serif',color:C.ref,align:'center'});
+      }
+      // vector
+      const vx=cx+r*cos(ang),vy=cy-r*sin(ang);
+      ctx.strokeStyle=C.accent;ctx.lineWidth=2.5;ctx.fillStyle=C.accent;
+      C.arrow(ctx,cx,cy,vx,vy,10);C.dot(ctx,vx,vy,5);
+      // sin projection (vertical at vx)
+      ctx.strokeStyle=C.taylor;ctx.lineWidth=2;C.line(ctx,vx,cy,vx,vy);
+      // cos projection (horizontal from center)
+      ctx.strokeStyle=C.cordic;ctx.lineWidth=2;C.line(ctx,cx,cy,vx,cy);
+      // dashed projection to y-axis
+      ctx.strokeStyle=C.taylor+'66';ctx.lineWidth=1;ctx.setLineDash([4,4]);
+      C.line(ctx,cx,vy,vx,vy);ctx.setLineDash([]);
+      // sin value at y-axis
+      C.txt(ctx,sin(ang).toFixed(3),cx-8,vy+1,{font:'12px monospace',color:C.taylor,align:'right'});
+      // cos value at x-axis
+      C.txt(ctx,cos(ang).toFixed(3),vx,cy+16,{font:'12px monospace',color:C.cordic,align:'center'});
+      // axis labels
+      C.txt(ctx,'sin',cx-8,cy-r-10,{font:'12px sans-serif',color:C.tx2+'88',align:'right'});
+      C.txt(ctx,'cos',cx+r+12,cy+16,{font:'12px sans-serif',color:C.tx2+'88'});
+      // dashed connector to wave dot (fixed at left edge)
+      ctx.strokeStyle=C.accent+'44';ctx.lineWidth=1;ctx.setLineDash([4,4]);
+      C.line(ctx,vx,vy,wx0,vy);ctx.setLineDash([]);
+      // wave axis
+      ctx.strokeStyle=C.grid;ctx.lineWidth=1;C.line(ctx,wx0,cy,wx1,cy);
+      // scrolling sine wave — one period from current angle
+      ctx.strokeStyle=C.taylor;ctx.lineWidth=2;ctx.beginPath();
+      for(let i=0;i<=360;i++){
+        const a=ang+(i/360)*TAU;
+        const px=wx0+(i/360)*ww,py=cy-r*sin(a);
+        i===0?ctx.moveTo(px,py):ctx.lineTo(px,py);
+      }
+      ctx.stroke();
+      // dot fixed at left edge
+      ctx.fillStyle=C.taylor;C.dot(ctx,wx0,vy,5);
+      // scrolling degree ticks
+      const degNow=(step%360);
+      for(let d=0;d<360;d+=90){
+        const off=((d-degNow)%360+360)%360;
+        const tx=wx0+(off/360)*ww;
+        if(tx>=wx0&&tx<=wx1){
+          ctx.strokeStyle=C.grid;C.line(ctx,tx,cy-4,tx,cy+4);
+          C.txt(ctx,d+'°',tx,cy+16,{align:'center',font:'11px sans-serif',color:C.tx2});
+        }
+      }
+      // labels
+      C.txt(ctx,'sin(θ)',wx0+ww/2,cy+r+30,{align:'center',color:C.tx2});
+      const deg=round(ang*180/PI)%360;
+      C.txt(ctx,'θ = '+deg+'°',cx-r,cy+r+30,{font:'13px sans-serif',color:C.ref});
+    }
+  });
+}
+
+// ============================================================
+// SECTION 2: FIXED-POINT INTERACTIVE
+// ============================================================
+function initFixedPoint(){
+  const box=$('fp-box');
+  // controls
+  const ctrlDiv=el('div','fp-controls',box);
+  const mkLabel=(txt,inp)=>{const l=el('label',null,ctrlDiv);l.textContent=txt+' ';l.appendChild(inp);return l};
+  const selBits=el('select');[8,16,32].forEach(v=>{const o=el('option');o.value=v;o.textContent=v+'-bit';selBits.appendChild(o)});
+  selBits.value='16';
+  mkLabel('Total bits:',selBits);
+  const slFrac=el('input');slFrac.type='range';slFrac.min=1;slFrac.max=14;slFrac.value=14;
+  const fracLbl=el('span','lbl');fracLbl.textContent='14';
+  const fl=mkLabel('Frac bits:',slFrac);fl.appendChild(fracLbl);
+  const slVal=el('input');slVal.type='range';slVal.min=-200;slVal.max=200;slVal.value=71;slVal.style.width='200px';
+  mkLabel('Value:',slVal);
+
+  // legend
+  const legend=el('div','fp-legend',box);
+  [['Sign',C.taylor],['Integer',C.ref],['Fraction',C.cordic]].forEach(([t,c])=>{
+    const s=el('span',null,legend);const d=el('span','dot',s);d.style.background=c;s.append(document.createTextNode(' '+t));
+  });
+  // bit row
+  const bitRow=el('div','bit-row',box);
+  // value display
+  const valDisp=el('div','fp-val',box);
+  // quantization canvas
+  const{ctx:qctx,w:qw,h:qh}=initCanvas('c-quant',1350,220);
+
+  function update(){
+    const tb=+selBits.value,maxF=tb-2;
+    slFrac.max=maxF;if(+slFrac.value>maxF)slFrac.value=maxF;
+    const fb=+slFrac.value;
+    fracLbl.textContent=fb;
+    const ib=tb-1-fb;
+    const scale=pow(2,fb);
+    const rawMax=pow(2,tb-1)-1,rawMin=-pow(2,tb-1);
+    slVal.min=rawMin;slVal.max=rawMax;
+    const raw=+slVal.value;
+    const floatVal=raw/scale;
+    // bit cells
+    bitRow.innerHTML='';
+    for(let b=tb-1;b>=0;b--){
+      const cell=el('div','bit-cell',bitRow);
+      cell.classList.add(b===tb-1?'sign':b>=fb?'int':'frac');
+      cell.textContent=(raw>>>b)&1;
+      if(raw<0){
+        const twos=(raw+pow(2,tb))&(pow(2,tb)-1);
+        cell.textContent=(twos>>>b)&1;
+      }
+    }
+    valDisp.innerHTML='<strong>Q'+ib+'.'+fb+'</strong> &nbsp; raw = '+raw+' &nbsp; value = '+floatVal.toFixed(fb>10?6:4)+
+      ' &nbsp; ('+raw+' &times; 2<sup>&minus;'+fb+'</sup>)';
+    clear(qctx,qw,qh);
+    const step=1/scale;
+    const margin=60,lineW=qw-2*margin;
+    const fmin=rawMin/scale,fmax=rawMax/scale;
+    // pad range slightly for visual breathing room
+    const pad=(fmax-fmin)*0.04;
+    const vmin=fmin-pad,vmax=fmax+pad;
+
+    // ── top: full range overview ──
+    const oy=40;
+    const toX=v=>margin+(v-vmin)/(vmax-vmin)*lineW;
+    qctx.strokeStyle=C.axis;qctx.lineWidth=1.5;C.line(qctx,margin,oy,qw-margin,oy);
+    // pick nice tick interval
+    const range=fmax-fmin;
+    const rawTick=range/8;
+    const mag=pow(10,Math.floor(log10(rawTick)));
+    const tickStep=[1,2,5,10].map(m=>m*mag).find(t=>range/t<=10)||mag*10;
+    const firstTkO=Math.ceil(fmin/tickStep)*tickStep;
+    for(let v=firstTkO;v<=fmax;v+=tickStep){
+      const x=toX(v);C.line(qctx,x,oy-5,x,oy+5);
+      const lbl=abs(v)<0.001&&v!==0?v.toExponential(0):(Number.isInteger(v)?v.toString():v.toFixed(abs(v)<10?1:0));
+      C.txt(qctx,lbl,x,oy+18,{align:'center',font:'10px monospace',color:C.tx2});
+    }
+    // representable range bar
+    qctx.fillStyle=C.cordic+'18';
+    qctx.fillRect(toX(fmin),oy-8,toX(fmax)-toX(fmin),16);
+    // current value dot
+    qctx.fillStyle=C.accent;C.dot(qctx,toX(floatVal),oy,5);
+    C.txt(qctx,'['+fmin.toFixed(1)+', '+fmax.toFixed(1)+']',qw-margin,oy-18,{align:'right',font:'10px monospace',color:C.tx2});
+
+    // ── bottom: zoomed inset around current value ──
+    const zy=130;
+    const nVisible=20;
+    const zoomHalf=nVisible/2*step;
+    const zCenter=floatVal;
+    const zMin=zCenter-zoomHalf,zMax=zCenter+zoomHalf;
+    const toZX=v=>margin+(v-zMin)/(zMax-zMin)*lineW;
+    qctx.strokeStyle=C.axis;qctx.lineWidth=1;C.line(qctx,margin,zy,qw-margin,zy);
+    // draw individual representable values as ticks
+    const firstTick=Math.ceil(zMin/step)*step;
+    qctx.strokeStyle=C.cordic+'55';qctx.lineWidth=1;
+    for(let v=firstTick;v<=zMax;v+=step){
+      const x=toZX(v);
+      if(x<margin-1||x>qw-margin+1)continue;
+      C.line(qctx,x,zy-12,x,zy+12);
+    }
+    // current value on zoom
+    if(floatVal>=zMin&&floatVal<=zMax){
+      qctx.fillStyle=C.accent;C.dot(qctx,toZX(floatVal),zy,6);
+      glow(qctx,C.accent,8);
+      C.dot(qctx,toZX(floatVal),zy,4);
+      noGlow(qctx);
+    }
+    // bracket showing 1 step
+    const lsbX1=toZX(floatVal),lsbX2=toZX(floatVal+step);
+    if(lsbX2<qw-margin+1){
+      qctx.strokeStyle=C.ref;qctx.lineWidth=1.5;
+      C.line(qctx,lsbX1,zy+18,lsbX2,zy+18);
+      C.line(qctx,lsbX1,zy+14,lsbX1,zy+22);
+      C.line(qctx,lsbX2,zy+14,lsbX2,zy+22);
+      C.txt(qctx,'1 step',( lsbX1+lsbX2)/2,zy+32,{align:'center',font:'10px sans-serif',color:C.ref});
+    }
+    // zoom label with values
+    const zoomLeft=max(zMin,fmin).toFixed(fb>10?6:4);
+    const zoomRight=min(zMax,fmax).toFixed(fb>10?6:4);
+    C.txt(qctx,zoomLeft,margin,zy+18,{font:'9px monospace',color:C.tx2});
+    C.txt(qctx,zoomRight,qw-margin,zy+18,{align:'right',font:'9px monospace',color:C.tx2});
+    // connector lines from overview to zoom
+    qctx.strokeStyle=C.tx2+'33';qctx.lineWidth=1;qctx.setLineDash([3,3]);
+    C.line(qctx,toX(zMin),oy+8,margin,zy-16);
+    C.line(qctx,toX(zMax),oy+8,qw-margin,zy-16);
+    qctx.setLineDash([]);
+    // info line
+    C.txt(qctx,'1 step = 2⁻'+fb+' = '+step.toExponential(1)+'     '+round(1/step)+' values per unit',qw/2,zy+55,{align:'center',font:'11px monospace',color:C.tx2});
+  }
+  selBits.onchange=update;slFrac.oninput=update;slVal.oninput=update;
+  update();
+}
+
+// ============================================================
+// SECTION 3: LOOKUP TABLE (static diagram)
+// ============================================================
+function initLUT(){
+  const{ctx,w,h}=initCanvas('c-lut',1350,320);
+  clear(ctx,w,h);
+  const N=16,margin=60,tblY=80,tblH=120,cellW=(w-2*margin)/N;
+  // table cells
+  for(let i=0;i<N;i++){
+    const x=margin+i*cellW;
+    ctx.strokeStyle=C.grid;ctx.lineWidth=1;
+    ctx.strokeRect(x,tblY,cellW,40);
+    const ang=i*PI/(2*(N-1));
+    const sv=sin(ang).toFixed(2);
+    C.txt(ctx,sv,x+cellW/2,tblY+20,{align:'center',font:'11px monospace',color:C.tx});
+    C.txt(ctx,i.toString(),x+cellW/2,tblY-10,{align:'center',font:'10px monospace',color:C.tx2});
+  }
+  // query angle
+  const qIdx=6.4,qX=margin+qIdx*cellW;
+  ctx.fillStyle=C.ref+'44';ctx.fillRect(margin+6*cellW,tblY,cellW*2,40);
+  ctx.strokeStyle=C.ref;ctx.lineWidth=2;
+  C.line(ctx,qX,tblY+50,qX,tblY+40);C.dot(ctx,qX,tblY+55,5);
+  ctx.fillStyle=C.ref;
+  C.txt(ctx,'θ = 36°',qX,tblY+72,{align:'center',font:'13px sans-serif',color:C.ref});
+  C.txt(ctx,'Index: 6.4 → interpolate between [6] and [7]',w/2,tblY+100,{align:'center',color:C.tx2});
+  C.txt(ctx,'result = table[6] + 0.4 × (table[7] − table[6])',w/2,tblY+125,{align:'center',font:'13px monospace',color:C.tx});
+  // labels
+  C.txt(ctx,'sin[] table in PROGMEM',w/2,tblY-30,{align:'center',font:'14px Cambria,Palatino,serif',color:C.tx2});
+  C.txt(ctx,'Cost: N entries of memory + multiply for interpolation',w/2,tblY+165,{align:'center',font:'13px sans-serif',color:C.tx2});
+}
+
+// ============================================================
+// SECTION 4: CORDIC
+// ============================================================
+function cordicStates(angle,n){
+  const at=[];for(let i=0;i<n;i++)at.push(atan(pow(2,-i)));
+  let K=1;for(let i=0;i<n;i++)K*=sqrt(1+pow(2,-2*i));
+  let x=1/K,y=0,z=angle;
+  const st=[{x,y,z,dir:'',at:0}];
+  for(let i=0;i<n;i++){
+    const dx=y*pow(2,-i),dy=x*pow(2,-i),d=z>=0?1:-1;
+    x-=d*dx;y+=d*dy;z-=d*at[i];
+    st.push({x,y,z,dir:d>0?'+':'−',at:at[i]});
+  }
+  return st;
+}
+
+function initCordic(){
+  const numIter=14;
+  let targetDeg=0,targetAng=0;
+  let states=cordicStates(targetAng,numIter);
+
+  const{ctx,w,h}=initCanvas('c-cordic',640,560);
+
+  let anim,curStep=0,curFrac=0;
+  const monoS='13px Cascadia Code,Consolas,monospace';
+  const sansS='13px Segoe UI,system-ui,sans-serif';
+  const{ctx:cctx,w:cw,h:cch}=initCanvas('c-conv',450,560);
+
+  function renderCordic(ctx,t,W,H){
+    clear(ctx,W,H);
+    const step=min(floor(t),numIter);
+    const frac=t-step;
+    const ef=ease(frac);
+    curStep=step;curFrac=frac;
+    const cx=W/2,cy=H/2-10,r=min(W,H)/2-60;
+    const sA=states[min(step,states.length-1)];
+    const sB=states[min(step+1,states.length-1)];
+    const ix=lerp(sA.x,sB.x,ef),iy=lerp(sA.y,sB.y,ef),iz=lerp(sA.z,sB.z,ef);
+    ctx.strokeStyle=C.grid;ctx.lineWidth=1;
+    C.line(ctx,cx-r-30,cy,cx+r+30,cy);C.line(ctx,cx,cy-r-30,cx,cy+r+30);
+    ctx.strokeStyle=C.axis;ctx.lineWidth=1;
+    ctx.beginPath();ctx.arc(cx,cy,r,0,TAU);ctx.stroke();
+    ctx.strokeStyle=C.ref+'55';ctx.lineWidth=1.5;ctx.setLineDash([8,5]);
+    const tx=cx+r*1.08*cos(targetAng),ty=cy-r*1.08*sin(targetAng);
+    C.line(ctx,cx,cy,tx,ty);ctx.setLineDash([]);
+    C.txt(ctx,'θ = '+targetDeg+'°',tx+12,ty-6,{font:sansS,color:C.ref});
+    if(step>0){
+      ctx.strokeStyle=C.cordic+'28';ctx.lineWidth=1.5;ctx.beginPath();
+      ctx.moveTo(cx+r*states[0].x,cy-r*states[0].y);
+      for(let i=1;i<=step;i++){
+        const p=states[min(i,states.length-1)];
+        ctx.lineTo(cx+r*p.x,cy-r*p.y);
+      }
+      if(frac>0.01)ctx.lineTo(cx+r*ix,cy-r*iy);
+      ctx.stroke();
+      for(let i=1;i<step;i++){
+        const p=states[i];
+        ctx.fillStyle=C.cordic+'44';C.dot(ctx,cx+r*p.x,cy-r*p.y,3);
+      }
+    }
+    const vx=cx+r*ix,vy=cy-r*iy;
+    glow(ctx,C.cordic,frac>0.01&&frac<0.99?12:0);
+    ctx.strokeStyle=C.cordic;ctx.lineWidth=2.5;ctx.fillStyle=C.cordic;
+    C.arrow(ctx,cx,cy,vx,vy,12);C.dot(ctx,vx,vy,6);
+    noGlow(ctx);
+    if(abs(iz)>.005){
+      const curAng=Math.atan2(iy,ix);
+      ctx.strokeStyle=iz>=0?C.minimax+'88':C.taylor+'88';ctx.lineWidth=2;
+      ctx.beginPath();
+      ctx.arc(cx,cy,50,-curAng,-curAng-iz,iz>=0);ctx.stroke();
+      C.txt(ctx,'z',cx+60*cos(-curAng-iz/2),cy+60*sin(-curAng-iz/2),{font:'12px sans-serif',color:iz>=0?C.minimax:C.taylor,align:'center'});
+    }
+    // dashed projections to axes
+    ctx.strokeStyle=C.cordic+'44';ctx.lineWidth=1;ctx.setLineDash([4,4]);
+    C.line(ctx,cx,vy,vx,vy);
+    C.line(ctx,vx,vy,vx,cy);
+    ctx.setLineDash([]);
+    // sin/cos values at axes
+    C.txt(ctx,iy.toFixed(4),cx-8,vy+1,{font:'12px monospace',color:C.cordic,align:'right'});
+    C.txt(ctx,ix.toFixed(4),vx,cy+16,{font:'12px monospace',color:C.cordic,align:'center'});
+    // axis labels
+    C.txt(ctx,'sin',cx-8,cy-r-12,{font:'12px sans-serif',color:C.tx2+'88',align:'right'});
+    C.txt(ctx,'cos',cx+r+15,cy+16,{font:'12px sans-serif',color:C.tx2+'88'});
+
+  }
+
+  const sweepDur=6;
+  const cycleDur=numIter+sweepDur;
+
+  function renderWrapped(ctx,t,W,H){
+    const ct=t%cycleDur;
+    if(ct>numIter){
+      const frac=min((ct-numIter)/sweepDur,1);
+      const half=frac<0.5?ease(frac*2):ease((1-frac)*2);
+      const ang=half*PI/2;
+      targetAng=ang;targetDeg=round(ang*180/PI);
+      states=cordicStates(targetAng,numIter);
+      renderCordic(ctx,numIter,W,H);
+      drawConv();
+    }else{
+      if(targetAng!==0){targetDeg=0;targetAng=0;states=cordicStates(0,numIter)}
+      renderCordic(ctx,ct,W,H);
+      drawConv();
+    }
+  }
+
+  anim=new Anim({canvas:$('c-cordic'),ctx,w,h,steps:1e9,speed:1,loop:false,
+    render:renderWrapped});
+
+  // Convergence chart + stats table
+  function drawConv(){
+    clear(cctx,cw,cch);
+    const barH=260;
+    const mg={l:70,r:20,t:30,b:40},pw=cw-mg.l-mg.r,ph=barH-mg.t-mg.b;
+    cctx.strokeStyle=C.axis;cctx.lineWidth=1;
+    C.line(cctx,mg.l,mg.t,mg.l,barH-mg.b);C.line(cctx,mg.l,barH-mg.b,cw-mg.r,barH-mg.b);
+    C.txt(cctx,'Iteration',cw/2,barH-mg.b+30,{align:'center',font:'11px sans-serif',color:C.tx2});
+    const errs=[];
+    for(let i=1;i<=numIter;i++){
+      const s=states[i];
+      errs.push(max(abs(s.y-sin(targetAng)),abs(s.x-cos(targetAng))));
+    }
+    let eMin=Infinity,eMax=0;
+    for(const e of errs){if(e>0){eMin=min(eMin,e);eMax=max(eMax,e)}}
+    if(eMin===Infinity)eMin=1e-16;
+    const logMax=Math.ceil(log10(eMax));
+    const logMin=Math.floor(log10(max(eMin,1e-16)))-1;
+    const toY=logV=>barH-mg.b-(logV-logMin)/(logMax-logMin)*ph;
+    for(let p=logMax;p>=logMin;p--){
+      const y=toY(p);
+      cctx.strokeStyle=C.grid;C.line(cctx,mg.l,y,cw-mg.r,y);
+      if(p%2===0)C.txt(cctx,'1e'+p,mg.l-8,y,{align:'right',font:'10px monospace',color:C.tx2});
+    }
+    const barW=pw/numIter*.6;
+    for(let i=0;i<numIter;i++){
+      const e=errs[i];
+      const logE=e>0?log10(e):logMin;
+      const x=mg.l+((i+.5)/numIter)*pw;
+      const top=toY(max(logE,logMin)),bot=toY(logMin);
+      cctx.fillStyle=C.cordic+'88';
+      cctx.fillRect(x-barW/2,top,barW,bot-top);
+      C.txt(cctx,(i+1).toString(),x,barH-mg.b+14,{align:'center',font:'10px monospace',color:C.tx2});
+    }
+    C.txt(cctx,'max(|sin err|, |cos err|) after iteration i',cw-mg.r-10,mg.t+12,{align:'right',font:'10px sans-serif',color:C.cordic});
+    // stats table
+    const step=curStep,sA=states[min(step,states.length-1)];
+    const ef=ease(curFrac);
+    const sB=states[min(step+1,states.length-1)];
+    const ix=lerp(sA.x,sB.x,ef),iy=lerp(sA.y,sB.y,ef),iz=lerp(sA.z,sB.z,ef);
+    const sy=barH+50,lh=22,col1=20,col2=170;
+    C.txt(cctx,'Iteration '+step+' / '+numIter,col1,sy,{font:'14px Cambria,Palatino,serif',color:C.accent});
+    const rows=[
+      ['x (cos)',ix.toFixed(6),C.cordic],
+      ['y (sin)',iy.toFixed(6),C.cordic],
+      ['z (residual)',iz.toFixed(6),abs(iz)<0.001?C.minimax:C.tx],
+    ];
+    if(step>0){
+      rows.push(['direction',sA.dir+' (rotate '+(sA.dir==='+'?'CCW':'CW')+')',C.tx]);
+      rows.push(['shift','>> '+(step-1),C.tx]);
+      rows.push(['atan(2⁻'+(step-1)+')',sA.at.toFixed(6),C.ref]);
+    }
+    rows.forEach((row,i)=>{
+      const y=sy+28+i*lh;
+      C.txt(cctx,row[0],col1,y,{font:'12px sans-serif',color:C.tx2});
+      C.txt(cctx,row[1],col2,y,{font:'12px monospace',color:row[2]});
+    });
+    const sepY2=sy+28+rows.length*lh+6;
+    cctx.strokeStyle=C.grid;C.line(cctx,col1,sepY2,cw-20,sepY2);
+    const trueRows=[
+      ['true sin',sin(targetAng).toFixed(6),C.tx2],
+      ['true cos',cos(targetAng).toFixed(6),C.tx2],
+      ['sin err',abs(iy-sin(targetAng)).toExponential(2),C.ref],
+      ['cos err',abs(ix-cos(targetAng)).toExponential(2),C.ref],
+    ];
+    trueRows.forEach((row,i)=>{
+      const y=sepY2+16+i*lh;
+      C.txt(cctx,row[0],col1,y,{font:'12px sans-serif',color:C.tx2});
+      C.txt(cctx,row[1],col2,y,{font:'12px monospace',color:row[2]});
+    });
+  }
+  drawConv();
+
+  // K factor chart
+  const{ctx:kctx,w:kw,h:kh}=initCanvas('c-kfact',1350,220);
+  clear(kctx,kw,kh);
+  const m={l:70,r:30,t:25,b:40},pw2=kw-m.l-m.r,ph2=kh-m.t-m.b;
+  kctx.strokeStyle=C.axis;kctx.lineWidth=1;
+  C.line(kctx,m.l,m.t,m.l,kh-m.b);C.line(kctx,m.l,kh-m.b,kw-m.r,kh-m.b);
+  C.txt(kctx,'Iteration',kw/2,kh-8,{align:'center',font:'12px sans-serif',color:C.tx2});
+  C.txt(kctx,'1/K product',20,kh/2,{align:'center',font:'12px sans-serif',color:C.tx2});
+  let K=1;const kvals=[1];
+  for(let i=0;i<numIter;i++){K*=sqrt(1+pow(2,-2*i));kvals.push(1/K)}
+  const yScale=v=>kh-m.b-(v/1.1)*ph2;
+  kctx.strokeStyle=C.accent;kctx.lineWidth=2;kctx.beginPath();
+  for(let i=0;i<=numIter;i++){
+    const x=m.l+((i+.5)/(numIter+1))*pw2;
+    i===0?kctx.moveTo(x,yScale(kvals[i])):kctx.lineTo(x,yScale(kvals[i]));
+    kctx.fillStyle=C.accent;C.dot(kctx,x,yScale(kvals[i]),3);
+    C.txt(kctx,i.toString(),x,kh-m.b+14,{align:'center',font:'10px monospace',color:C.tx2});
+  }
+  kctx.stroke();
+  // asymptote
+  kctx.strokeStyle=C.ref+'66';kctx.lineWidth=1;kctx.setLineDash([4,4]);
+  const asymY=yScale(0.60725);
+  C.line(kctx,m.l,asymY,kw-m.r,asymY);kctx.setLineDash([]);
+  C.txt(kctx,'0.6073',m.l-8,asymY,{align:'right',font:'11px monospace',color:C.ref});
+  // y ticks
+  [0,.2,.4,.6,.8,1].forEach(v=>{
+    const y=yScale(v);C.txt(kctx,v.toFixed(1),m.l-8,y,{align:'right',font:'10px monospace',color:C.tx2});
+    kctx.strokeStyle=C.grid;C.line(kctx,m.l,y,kw-m.r,y);
+  });
+}
+
+// ============================================================
+// SECTION 5a: HORNER ALGORITHM DISPLAY
+// ============================================================
+function initHorner(){
+  const{ctx,w,h}=initCanvas('c-horner',1350,430);
+  const coeffs=[1,-1/6,1/120];
+  const labels=['c₀ = 1','c₁ = −1/6','c₂ = 1/120'];
+  const xVal=PI/4, u=xVal*xVal;
+  // precompute steps
+  // step 0: show setup (x, u=x²)
+  // step 1: r = c₂
+  // step 2: r = c₁ + u·r  (MUL + ADD)
+  // step 3: r = c₀ + u·r  (MUL + ADD)
+  // step 4: sin = x·r     (final MUL)
+  const n=coeffs.length;
+  const rVals=[0];
+  let r=coeffs[n-1];rVals.push(r);
+  for(let i=n-2;i>=0;i--){r=coeffs[i]+u*r;rVals.push(r)}
+  const sinResult=xVal*r;rVals.push(sinResult);
+  const trueVal=sin(xVal);
+
+  new Anim({canvas:$('c-horner'),ctx,w,h,steps:4,speed:1,loop:true,
+    render(ctx,t,W,H){
+      const step=floor(min(t,4));
+      const frac=t-step;
+      const ef=ease(frac);
+      clear(ctx,W,H);
+      const lx=50,rx=W-50,ty=30;
+      const monoF='15px Cascadia Code,Consolas,monospace';
+      const sansF='14px Segoe UI,system-ui,sans-serif';
+      const bigF='17px Cascadia Code,Consolas,monospace';
+      C.txt(ctx,'Horner evaluation: sin(π/4) with 3 terms',W/2,ty,{align:'center',font:'15px Cambria,Palatino,serif',color:C.tx2});
+      const fy=75;
+      const parts=[
+        {t:'sin(x) = x',x:lx},
+        {t:' · ( ',x:0},
+        {t:'c₀',x:0,step:3},
+        {t:' + u · ( ',x:0},
+        {t:'c₁',x:0,step:2},
+        {t:' + u · ',x:0},
+        {t:'c₂',x:0,step:1},
+        {t:' ) )',x:0},
+      ];
+      ctx.font=bigF;let px=lx;
+      parts.forEach(p=>{
+        const active=p.step!==undefined&&p.step===step;
+        const done=p.step!==undefined&&p.step<step;
+        const finalMul=(step===4&&p.t==='sin(x) = x');
+        ctx.fillStyle=active?C.accent:done?C.minimax+'aa':finalMul?C.accent:C.tx+'88';
+        ctx.globalAlpha=active&&frac<0.3?lerp(0.4,1,ef*3.33):1;
+        ctx.textAlign='left';ctx.textBaseline='middle';
+        ctx.fillText(p.t,px,fy);px+=ctx.measureText(p.t).width;
+        ctx.globalAlpha=1;
+      });
+      C.txt(ctx,'where u = x²',px+20,fy,{font:sansF,color:C.tx2});
+
+      const tableY=130,rowH=50;
+      const stepDescs=[
+        {label:'Setup',desc:'x = π/4 = '+xVal.toFixed(4),desc2:'u = x² = '+u.toFixed(4),val:'',op:''},
+        {label:'Load c₂',desc:'r = c₂ = 1/120',val:rVals[1].toFixed(6),op:''},
+        {label:'Horner step',desc:'r = c₁ + u · r',val:rVals[2].toFixed(6),op:'MUL + ADD'},
+        {label:'Horner step',desc:'r = c₀ + u · r',val:rVals[3].toFixed(6),op:'MUL + ADD'},
+        {label:'Final multiply',desc:'sin(x) = x · r',val:rVals[4].toFixed(6),op:'MUL'},
+      ];
+      const cols=[lx,lx+130,lx+400,lx+620,lx+780];
+      ctx.fillStyle=C.tx2;ctx.font='12px sans-serif';ctx.textAlign='left';ctx.textBaseline='middle';
+      ['Step','Operation','Expression','Accumulator r','HW op'].forEach((h,i)=>ctx.fillText(h,cols[i],tableY));
+      ctx.strokeStyle=C.grid;ctx.lineWidth=1;C.line(ctx,lx,tableY+12,rx,tableY+12);
+      for(let i=0;i<=4;i++){
+        const y=tableY+30+i*rowH;const d=stepDescs[i];
+        const active=i===step,done=i<step;
+        const rowAlpha=i>step+1?0.25:i===step+1?lerp(0.25,0.4,ef):1;
+        ctx.globalAlpha=rowAlpha;
+        if(active){
+          ctx.fillStyle=C.accent+(frac>0?'18':'18');
+          ctx.fillRect(lx-10,y-18,rx-lx+20,rowH);
+        }
+        ctx.fillStyle=active?C.accent:done?C.minimax:C.tx2;ctx.font=monoF;ctx.textAlign='left';ctx.textBaseline='middle';
+        ctx.fillText(i.toString(),cols[0],y);
+        ctx.fillStyle=active?C.tx:done?C.tx+'aa':C.tx2;ctx.font=sansF;
+        ctx.fillText(d.label,cols[1],y);
+        ctx.font=monoF;ctx.fillStyle=active?C.accent:done?C.tx+'aa':C.tx2;
+        ctx.fillText(d.desc,cols[2],y);
+        if(d.desc2){ctx.fillStyle=C.tx2;ctx.fillText(d.desc2,cols[2],y+18)}
+        if(i>0&&i<=step){
+          ctx.fillStyle=active?C.accent:C.minimax;ctx.font=monoF;
+          ctx.fillText(d.val,cols[3],y);
+        }
+        if(d.op&&i<=step){
+          if(active&&frac<0.5)glow(ctx,C.ref,lerp(8,0,ef*2));
+          ctx.fillStyle=C.ref;ctx.font='bold 13px sans-serif';
+          ctx.fillText(d.op,cols[4],y);
+          noGlow(ctx);
+        }
+        ctx.globalAlpha=1;
+        if(i<4){ctx.strokeStyle=C.grid+'66';C.line(ctx,lx,y+rowH/2,rx,y+rowH/2)}
+      }
+      if(step>=4){
+        const ry=tableY+30+5*rowH-10;
+        const revealAlpha=ef;
+        ctx.globalAlpha=step>4?1:revealAlpha;
+        ctx.strokeStyle=C.grid;C.line(ctx,lx,ry-15,rx,ry-15);
+        C.txt(ctx,'Computed: '+sinResult.toFixed(6),cols[1],ry,{font:monoF,color:C.accent});
+        C.txt(ctx,'True:     '+trueVal.toFixed(6),cols[1],ry+22,{font:monoF,color:C.tx2});
+        C.txt(ctx,'Error:    '+abs(sinResult-trueVal).toExponential(2),cols[1],ry+44,{font:monoF,color:C.ref});
+        C.txt(ctx,'3 multiplies total, one per Horner step + final',cols[3]-20,ry+22,{font:sansF,color:C.tx2});
+        ctx.globalAlpha=1;
+      }
+    }
+  });
+}
+
+// ============================================================
+// SECTION 5b: POLYNOMIAL CONVERGENCE
+// ============================================================
+const TAYLOR_SIN=[1,-1/6,1/120,-1/5040,1/362880];
+const TAYLOR_COS=[1,-1/2,1/24,-1/720,1/40320];
+const MINIMAX_SIN_SETS=[
+  [0.950158158078553],
+  [0.999612281285356,-0.161601101388649],
+  [0.999998569413308,-0.166624801677571,0.008151635577935],
+  [0.999999996926343,-0.166666506992024,0.008332036875158,-0.000195040220004],
+  [0.999999999995682,-0.166666666316355,0.008333328786054,-0.000198392031457,0.000002717353257],
+];
+const MINIMAX_COS_SETS=[
+  [0.853553390593274],
+  [0.998078499008760,-0.474820601775892],
+  [0.999990034955207,-0.499708140354674,0.040398535966129],
+  [0.999999972423323,-0.499998566958488,0.041655026884241,-0.001358590850996],
+  [0.999999999952600,-0.499999996154334,0.041666616739201,-0.001388661921009,0.000024379929364],
+];
+
+function evalPoly(coeffs,nTerms,x,odd){
+  const u=x*x;let r=coeffs[min(nTerms,coeffs.length)-1];
+  for(let j=min(nTerms,coeffs.length)-2;j>=0;j--)r=coeffs[j]+u*r;
+  return odd?x*r:r;
+}
+
+function initPoly(){
+  const maxTerms=max(TAYLOR_SIN.length,MINIMAX_SIN_SETS.length);
+  const{ctx,w,h}=initCanvas('c-poly',1350,450);
+
+  let anim;
+  anim=new Anim({canvas:$('c-poly'),ctx,w,h,steps:maxTerms,speed:1,loop:true,
+    render(ctx,t,W,H){
+      clear(ctx,W,H);
+      const rawStep=max(1,t);
+      const step=floor(rawStep);
+      const frac=rawStep-step;
+      const ef=ease(frac);
+      const mg={l:60,r:40,t:30,b:45},pw=W-mg.l-mg.r,ph=H-mg.t-mg.b;
+      const xMin=0,xMax=PI/2*1.15,yMin=-0.3,yMax=1.15;
+      const toX=v=>mg.l+(v-xMin)/(xMax-xMin)*pw;
+      const toY=v=>H-mg.b-(v-yMin)/(yMax-yMin)*ph;
+      ctx.strokeStyle=C.grid;ctx.lineWidth=1;
+      C.line(ctx,mg.l,mg.t,mg.l,H-mg.b);C.line(ctx,mg.l,H-mg.b,W-mg.r,H-mg.b);
+      [0,.25,.5,.75,1].forEach(v=>{C.line(ctx,mg.l,toY(v),W-mg.r,toY(v));
+        C.txt(ctx,v.toFixed(2),mg.l-8,toY(v),{align:'right',font:'10px mono',color:C.tx2})});
+      // π/4 reference line
+      ctx.strokeStyle=C.ref+'33';ctx.lineWidth=1;ctx.setLineDash([4,4]);
+      C.line(ctx,toX(PI/4),mg.t,toX(PI/4),H-mg.b);ctx.setLineDash([]);
+      C.txt(ctx,'π/4',toX(PI/4),H-mg.b+30,{align:'center',font:'11px sans-serif',color:C.ref+'88'});
+      // true sine
+      ctx.strokeStyle=C.tx+'88';ctx.lineWidth=2;ctx.beginPath();
+      for(let i=0;i<=300;i++){
+        const x=xMin+(xMax-xMin)*i/300;
+        const px=toX(x),py=toY(sin(x));
+        i===0?ctx.moveTo(px,py):ctx.lineTo(px,py);
+      }
+      ctx.stroke();
+      // Taylor curve with interpolation
+      function drawTaylor(nTermsFloat,color){
+        const nA=floor(min(nTermsFloat,TAYLOR_SIN.length));
+        const nB=min(nA+1,TAYLOR_SIN.length);
+        const blend=nTermsFloat-floor(nTermsFloat);
+        const eb=ease(blend);
+        ctx.strokeStyle=color;ctx.lineWidth=2;ctx.beginPath();
+        for(let i=0;i<=300;i++){
+          const x=xMin+(xMax-xMin)*i/300;
+          const vA=evalPoly(TAYLOR_SIN,nA,x,true);
+          const vB=nB>nA?evalPoly(TAYLOR_SIN,nB,x,true):vA;
+          const v=max(yMin-0.1,min(yMax+0.1,lerp(vA,vB,eb)));
+          const px=toX(x),py=toY(v);
+          i===0?ctx.moveTo(px,py):ctx.lineTo(px,py);
+        }
+        ctx.stroke();
+      }
+      // Minimax curve — proper per-degree coefficients
+      function drawMinimax(nTermsFloat,color){
+        const nA=max(0,min(floor(nTermsFloat),MINIMAX_SIN_SETS.length)-1);
+        const nB=min(nA+1,MINIMAX_SIN_SETS.length-1);
+        const blend=nTermsFloat-floor(nTermsFloat);
+        const eb=ease(blend);
+        const cA=MINIMAX_SIN_SETS[nA],cB=MINIMAX_SIN_SETS[nB];
+        ctx.strokeStyle=color;ctx.lineWidth=2;ctx.beginPath();
+        for(let i=0;i<=300;i++){
+          const x=xMin+(xMax-xMin)*i/300;
+          const vA=evalPoly(cA,cA.length,x,true);
+          const vB=nB>nA?evalPoly(cB,cB.length,x,true):vA;
+          const v=max(yMin-0.1,min(yMax+0.1,lerp(vA,vB,eb)));
+          const px=toX(x),py=toY(v);
+          i===0?ctx.moveTo(px,py):ctx.lineTo(px,py);
+        }
+        ctx.stroke();
+      }
+      drawTaylor(rawStep,C.taylor);
+      drawMinimax(min(rawStep,MINIMAX_SIN_SETS.length),C.minimax);
+      let ly=mg.t+15;
+      C.txt(ctx,'true sin(x)',W-mg.r-10,ly,{align:'right',font:'12px sans-serif',color:C.tx+'88'});ly+=18;
+      C.txt(ctx,'Taylor ('+step+' terms)',W-mg.r-10,ly,{align:'right',font:'12px sans-serif',color:C.taylor});ly+=18;
+      const mmN=min(step,MINIMAX_SIN_SETS.length);
+      C.txt(ctx,'Minimax ('+mmN+' terms)',W-mg.r-10,ly,{align:'right',font:'12px sans-serif',color:C.minimax});ly+=18;
+      C.txt(ctx,'x (radians)',W/2,H-8,{align:'center',font:'12px sans-serif',color:C.tx2});
+    }
+  });
+}
+
+// ============================================================
+// SECTION 5c: ERROR BANDS (side-by-side)
+// ============================================================
+function initErrorBands(){
+  const maxN=min(TAYLOR_SIN.length,MINIMAX_SIN_SETS.length);
+
+  function getErr(type,n,x){
+    if(type==='taylor')return sin(x)-evalPoly(TAYLOR_SIN,n,x,true);
+    const idx=min(n,MINIMAX_SIN_SETS.length)-1;
+    const c=MINIMAX_SIN_SETS[max(0,idx)];
+    return sin(x)-evalPoly(c,c.length,x,true);
+  }
+
+  function drawBand(canvasId,label,color,type){
+    const{ctx,w,h}=initCanvas(canvasId,540,300);
+    new Anim({canvas:$(canvasId),ctx,w,h,steps:maxN,speed:0.5,loop:true,
+      render(ctx,t,W,H){
+        clear(ctx,W,H);
+        const rawT=max(1,min(t,maxN));
+        const step=floor(rawT);
+        const frac=rawT-step;
+        const ef=ease(frac);
+        const mg={l:70,r:30,t:40,b:40},pw=W-mg.l-mg.r,ph=H-mg.t-mg.b;
+        const xMin=0,xMax=PI/4;
+        const toX=v=>mg.l+(v-xMin)/(xMax-xMin)*pw;
+        // find max error for auto-scale
+        let eMax=0;
+        const errs=[];
+        for(let i=0;i<=300;i++){
+          const x=xMin+(xMax-xMin)*i/300;
+          const eA=getErr(type,step,x);
+          const eB=getErr(type,min(step+1,maxN),x);
+          const e=lerp(eA,eB,ef);
+          errs.push({sx:toX(x),e});
+          eMax=max(eMax,abs(e));
+        }
+        eMax*=1.4;if(eMax<1e-15)eMax=1e-15;
+        const toY=v=>mg.t+ph/2-v/eMax*(ph/2);
+        // grid
+        ctx.strokeStyle=C.grid;ctx.lineWidth=1;
+        C.line(ctx,mg.l,mg.t,mg.l,H-mg.b);
+        C.line(ctx,mg.l,toY(0),W-mg.r,toY(0));
+        // ±eMax lines
+        ctx.strokeStyle=C.grid;ctx.setLineDash([3,3]);
+        C.line(ctx,mg.l,toY(eMax/1.4),W-mg.r,toY(eMax/1.4));
+        C.line(ctx,mg.l,toY(-eMax/1.4),W-mg.r,toY(-eMax/1.4));
+        ctx.setLineDash([]);
+        // error fill between curve and zero
+        ctx.fillStyle=color+'25';ctx.beginPath();
+        ctx.moveTo(errs[0].sx,toY(0));
+        errs.forEach(p=>ctx.lineTo(p.sx,toY(p.e)));
+        ctx.lineTo(errs[errs.length-1].sx,toY(0));
+        ctx.closePath();ctx.fill();
+        // error curve
+        ctx.strokeStyle=color;ctx.lineWidth=2.5;ctx.beginPath();
+        errs.forEach((p,i)=>i===0?ctx.moveTo(p.sx,toY(p.e)):ctx.lineTo(p.sx,toY(p.e)));
+        ctx.stroke();
+        // zero line accent
+        ctx.strokeStyle=C.tx+'44';ctx.lineWidth=1;
+        C.line(ctx,mg.l,toY(0),W-mg.r,toY(0));
+        // labels
+        C.txt(ctx,label+' ('+step+' terms)',W/2,22,{align:'center',font:'14px Cambria,Palatino,serif',color});
+        C.txt(ctx,'π/4',toX(PI/4),H-mg.b+18,{align:'center',font:'11px sans-serif',color:C.tx2});
+        C.txt(ctx,'0',toX(0),H-mg.b+18,{align:'center',font:'11px sans-serif',color:C.tx2});
+        C.txt(ctx,'error',12,H/2,{align:'center',font:'11px sans-serif',color:C.tx2});
+        C.txt(ctx,'±'+eMax.toExponential(1),mg.l-6,mg.t+8,{align:'right',font:'9px monospace',color:C.tx2});
+      }
+    });
+  }
+
+  drawBand('c-errband-taylor','Taylor',C.taylor,'taylor');
+  drawBand('c-errband-minimax','Minimax',C.minimax,'minimax');
+}
+
+
+// ============================================================
+// SECTION 6: CODE BLOCKS
+// ============================================================
+function initCode(){
+  $('code-cordic').innerHTML=highlight(
+`<span class="ck">void</span> <span class="cf">cordic_sincos</span>(<span class="ct">fixed_t</span> angle, <span class="ct">fixed_t</span> *sin_out, <span class="ct">fixed_t</span> *cos_out)
+{
+    <span class="ct">fixed_t</span> x = CORDIC_INV_K;
+    <span class="ct">fixed_t</span> y = <span class="cn">0</span>;
+    <span class="ct">fixed_t</span> z = angle;
+
+    <span class="ck">for</span> (<span class="ct">uint8_t</span> i = <span class="cn">0</span>; i < NUM_CORDIC_ITER; i++) {
+        <span class="ct">fixed_t</span> dx = y >> i;   <span class="cc">// arithmetic shift = multiply by 2^-i</span>
+        <span class="ct">fixed_t</span> dy = x >> i;
+
+        <span class="ck">if</span> (z >= <span class="cn">0</span>) {        <span class="cc">// rotate toward target</span>
+            x -= dx;  y += dy;  z -= atan_table[i];
+        } <span class="ck">else</span> {              <span class="cc">// rotate away</span>
+            x += dx;  y -= dy;  z += atan_table[i];
+        }
+    }
+    *cos_out = x;
+    *sin_out = y;
+}`);
+
+  $('code-poly').innerHTML=highlight(
+`<span class="ck">static</span> <span class="ct">fixed_t</span> <span class="cf">horner_odd</span>(<span class="ck">const</span> <span class="ct">fixed_t</span> *c, <span class="ct">uint8_t</span> n, <span class="ct">fixed_t</span> x)
+{
+    <span class="ct">fixed_t</span> u = <span class="cf">fixed_mul</span>(x, x);       <span class="cc">// u = x²</span>
+    <span class="ct">fixed_t</span> r = PGM_READ_FIXED(&c[n<span class="cn">-1</span>]);
+    <span class="ck">for</span> (<span class="ct">int8_t</span> i = n<span class="cn">-2</span>; i >= <span class="cn">0</span>; i--)
+        r = PGM_READ_FIXED(&c[i]) + <span class="cf">fixed_mul</span>(u, r);
+    <span class="ck">return</span> <span class="cf">fixed_mul</span>(x, r);           <span class="cc">// sin(x) = x · P(x²)</span>
+}
+
+<span class="cc">// sin(x) = x(c₀ + x²(c₁ + x²(c₂ + ...)))</span>
+<span class="cc">// Each step: one hardware MUL via fixed_mul</span>
+<span class="cc">// Taylor:  c₀=1, c₁=-1/6, c₂=1/120, ...</span>
+<span class="cc">// Minimax: Remez-optimized coefficients</span>`);
+
+  $('code-mul').innerHTML=highlight(
+`<span class="ck">static inline</span> <span class="ct">fixed_t</span> <span class="cf">fixed_mul</span>(<span class="ct">fixed_t</span> a, <span class="ct">fixed_t</span> b)
+{
+    <span class="cc">// 16-bit: compiles to __mulhisi3 (4× hardware MUL)</span>
+    <span class="cc">// 32-bit: compiles to __muldi3  (16× hardware MUL)</span>
+    <span class="ck">return</span> (<span class="ct">fixed_t</span>)(((<span class="ct">wide_t</span>)a * (<span class="ct">wide_t</span>)b) >> FRAC_BITS);
+}`);
+}
+function highlight(s){return s} // already pre-highlighted above
+
+// ============================================================
+// SECTION 7: COMPARISON PLOTS (real ATxmega128A1U measurements)
+// ============================================================
+const DATA={
+  // Measured on ATxmega128A1U @ 32 MHz, averaged across 7 test angles
+  // Prescaler: DIV1 (8-bit), DIV8 (16-bit), DIV64 (32-bit), K_LOOPS=100
+  cycles:[
+    {L:1,cordic:410,taylor:282,minimax:202},
+    {L:2,cordic:1488,taylor:1537,minimax:1215},
+    {L:4,cordic:9419,taylor:5345,minimax:4218},
+  ],
+  accuracy:[
+    {fb:6,cordic:4,taylor:1,minimax:1},
+    {fb:14,cordic:4,taylor:1,minimax:1},
+    {fb:30,cordic:5,taylor:1,minimax:1},
+  ],
+  opcount:[
+    {fb:6,cordic_iter:6,taylor_terms:3,minimax_terms:2},
+    {fb:14,cordic_iter:14,taylor_terms:4,minimax_terms:3},
+    {fb:30,cordic_iter:30,taylor_terms:6,minimax_terms:5},
+  ]
+};
+
+function svgPlot(containerId,W,H,cfg){
+  const NS='http://www.w3.org/2000/svg';
+  const el=(tag,attrs)=>{const e=document.createElementNS(NS,tag);for(const[k,v]of Object.entries(attrs||{}))e.setAttribute(k,v);return e};
+  const svg=el('svg',{viewBox:`0 0 ${W} ${H}`,xmlns:NS});
+  svg.style.display='block';svg.style.width='100%';svg.style.height='auto';
+
+  const m={l:90,r:20,t:30,b:80},pw=W-m.l-m.r,ph=H-m.t-m.b;
+  const xVals=cfg.x.map(d=>cfg.logX?log10(d):d);
+  const allY=cfg.series.flatMap(s=>s.data.map(d=>cfg.logY?log10(d):d));
+  let xMin=min(...xVals)-.3,xMax=max(...xVals)+.3;
+  let yMin=min(...allY)-.3,yMax=max(...allY)+.3;
+  if(cfg.yMin!==undefined)yMin=cfg.yMin;if(cfg.yMax!==undefined)yMax=cfg.yMax;
+  if(cfg.xMin!==undefined)xMin=cfg.xMin;if(cfg.xMax!==undefined)xMax=cfg.xMax;
+
+  const toX=v=>m.l+((cfg.logX?log10(v):v)-xMin)/(xMax-xMin)*pw;
+  const toY=v=>H-m.b-((cfg.logY?log10(v):v)-yMin)/(yMax-yMin)*ph;
+
+  // axes
+  svg.appendChild(el('line',{x1:m.l,y1:m.t,x2:m.l,y2:H-m.b,stroke:'#555','stroke-width':1}));
+  svg.appendChild(el('line',{x1:m.l,y1:H-m.b,x2:W-m.r,y2:H-m.b,stroke:'#555','stroke-width':1}));
+
+  // y grid + labels
+  if(cfg.yTicks) cfg.yTicks.forEach(v=>{
+    const py=toY(v);
+    if(py>=m.t&&py<=H-m.b){
+      svg.appendChild(el('line',{x1:m.l,y1:py,x2:W-m.r,y2:py,stroke:C.grid,'stroke-width':1}));
+      const t=el('text',{x:m.l-8,y:py+4,'text-anchor':'end',fill:C.tx2,'font-size':'10px','font-family':'monospace'});
+      t.textContent=cfg.yFmt?cfg.yFmt(v):v.toString();svg.appendChild(t);
+    }
+  });
+
+  // x ticks
+  cfg.x.forEach(v=>{
+    const px=toX(v);
+    svg.appendChild(el('line',{x1:px,y1:H-m.b,x2:px,y2:H-m.b+5,stroke:C.grid,'stroke-width':1}));
+    const t=el('text',{x:px,y:H-m.b+18,'text-anchor':'middle',fill:C.tx2,'font-size':'11px','font-family':'monospace'});
+    t.textContent=cfg.xFmt?cfg.xFmt(v):v.toString();svg.appendChild(t);
+  });
+
+  // axis labels
+  const xLab=el('text',{x:W/2,y:H-m.b+38,'text-anchor':'middle',fill:C.tx2,'font-size':'12px'});
+  xLab.textContent=cfg.xLabel||'';svg.appendChild(xLab);
+  if(cfg.yLabel){
+    const yLab=el('text',{x:m.l,y:m.t-10,fill:C.tx2,'font-size':'12px'});
+    yLab.textContent=cfg.yLabel;svg.appendChild(yLab);
+  }
+
+  // data traces
+  const valFmt=cfg.valFmt||(v=>v>=1000?(v/1000).toFixed(1)+'k':round(v).toString());
+  cfg.series.forEach((s,si)=>{
+    const pts=s.data.map((d,i)=>`${toX(cfg.x[i])},${toY(d)}`).join(' ');
+    svg.appendChild(el('polyline',{points:pts,fill:'none',stroke:s.color,'stroke-width':2.5,'stroke-linejoin':'round'}));
+    s.data.forEach((d,i)=>{
+      const px=toX(cfg.x[i]),py=toY(d);
+      svg.appendChild(el('circle',{cx:px,cy:py,r:5,fill:s.color}));
+      const off=(si-1)*14;
+      const lbl=el('text',{x:px+8,y:py+off+4,fill:s.color,'font-size':'10px','font-family':'monospace'});
+      lbl.textContent=valFmt(d);svg.appendChild(lbl);
+    });
+  });
+
+  // legend row below x-axis
+  const legY=H-6;
+  const legGap=28;
+  const labels=cfg.series.map(s=>s.label);
+  const charW=6.6;
+  const totalW=labels.reduce((a,l)=>a+l.length*charW+12+legGap,0)-legGap;
+  let lx=(W-totalW)/2;
+  cfg.series.forEach(s=>{
+    svg.appendChild(el('rect',{x:lx,y:legY-9,width:10,height:10,fill:s.color}));
+    const t=el('text',{x:lx+14,y:legY,fill:C.tx,'font-size':'11px'});
+    t.textContent=s.label;svg.appendChild(t);
+    lx+=s.label.length*charW+12+legGap;
+  });
+
+  const container=$(containerId);
+  container.innerHTML='';
+  container.appendChild(svg);
+}
+
+function initComparison(){
+  const D=DATA;
+  svgPlot('svg-cycles',640,440,{
+    x:D.cycles.map(d=>d.L),logX:false,logY:false,
+    xLabel:'L (limbs)',yLabel:'cycles',
+    xMin:0,xMax:5,yMin:0,yMax:10000,
+    series:[
+      {label:'CORDIC',color:C.cordic,data:D.cycles.map(d=>d.cordic)},
+      {label:'Taylor',color:C.taylor,data:D.cycles.map(d=>d.taylor)},
+      {label:'Minimax',color:C.minimax,data:D.cycles.map(d=>d.minimax)},
+    ],
+    xFmt:v=>'L='+v,yTicks:[0,2000,4000,6000,8000,10000],yFmt:v=>v>=1000?(v/1000)+'k':v.toString()
+  });
+
+  svgPlot('svg-acc',640,440,{
+    x:D.accuracy.map(d=>d.fb),logX:false,logY:false,
+    xLabel:'FRAC_BITS',yLabel:'max |error| (LSB)',
+    xMin:0,xMax:35,yMin:-.5,yMax:7,
+    series:[
+      {label:'CORDIC',color:C.cordic,data:D.accuracy.map(d=>d.cordic)},
+      {label:'Taylor',color:C.taylor,data:D.accuracy.map(d=>d.taylor)},
+      {label:'Minimax',color:C.minimax,data:D.accuracy.map(d=>d.minimax)},
+    ],
+    yTicks:[0,1,2,3,4,5,6],valFmt:v=>round(v).toString()
+  });
+
+  // Per-op cost
+  const opCost=D.cycles.map((d,i)=>({
+    L:d.L,
+    cordic:d.cordic/D.opcount[i].cordic_iter,
+    taylor:d.taylor/D.opcount[i].taylor_terms,
+    minimax:d.minimax/D.opcount[i].minimax_terms,
+  }));
+  svgPlot('svg-opcost',640,440,{
+    x:opCost.map(d=>d.L),logX:false,logY:false,
+    xLabel:'L (limbs)',yLabel:'cycles / operation',
+    xMin:0,xMax:5,yMin:0,yMax:1000,
+    series:[
+      {label:'CORDIC (per iter)',color:C.cordic,data:opCost.map(d=>d.cordic)},
+      {label:'Taylor (per term)',color:C.taylor,data:opCost.map(d=>d.taylor)},
+      {label:'Minimax (per term)',color:C.minimax,data:opCost.map(d=>d.minimax)},
+    ],
+    xFmt:v=>'L='+v,yTicks:[0,200,400,600,800,1000],yFmt:v=>v.toString(),valFmt:v=>round(v).toString()
+  });
+
+  svgPlot('svg-opcnt',640,440,{
+    x:D.opcount.map(d=>d.fb),logX:false,logY:false,
+    xLabel:'FRAC_BITS',yLabel:'operations',
+    xMin:0,xMax:35,yMin:0,yMax:35,valFmt:v=>round(v).toString(),
+    series:[
+      {label:'CORDIC iters',color:C.cordic,data:D.opcount.map(d=>d.cordic_iter)},
+      {label:'Taylor terms',color:C.taylor,data:D.opcount.map(d=>d.taylor_terms)},
+      {label:'Minimax terms',color:C.minimax,data:D.opcount.map(d=>d.minimax_terms)},
+    ],
+    yTicks:[0,5,10,15,20,25,30]
+  });
+}
+
+// ============================================================
+// INIT
+// ============================================================
+document.addEventListener('DOMContentLoaded',()=>{
+  initUnitCircle();
+  initFixedPoint();
+  initLUT();
+  initCordic();
+  initHorner();
+  initPoly();
+  initErrorBands();
+  initCode();
+  initComparison();
+});
+</script>
+</body>
+</html>

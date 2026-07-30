@@ -1,0 +1,213 @@
+Fixed-point trigonometry appears in motor control loops, sensor fusion pipelines, and 
+signal processing  routines across the embedded domain. The choice of algorithm has 
+real consequences for execution time, code size, and numerical accuracy, all of which 
+are tightly constrained on a part with 128 kilobytes of flash and a 32 MHz clock.
+
+A floating-point unit makes trigonometry trivial. Issue a single instruction, receive a
+result in IEEE 754 format, move on.  The ATxmega128A1U, however, is an 8-bit AVR 
+microcontroller with no FPU, no barrel shifter, and no division hardware. 
+What it does have is an 8-by-8 hardware multiplier. 
+So, given only addition, subtraction, bitwise shifts, and that single multiply instruction,
+how do you compute sine and cosine?
+
+The unit circle is the place to start. A vector of unit length, rotated to some angle
+theta, has projections onto the x and y axes equal to cosine and sine. As the vector sweeps 
+through a full rotation, the vertical projection traces out the familiar sine wave. 
+Every algorithm we look at here is, at its core, trying to compute those two projections 
+using nothing but integer arithmetic.
+
+
+II. FIXED-POINT REPRESENTATION
+
+Before looking at any algorithm, lets cover the number format. Without floating-point 
+hardware, fractional values are encoded in fixed-point format: an ordinary integer 
+whose bits are interpreted as having an implicit binary point. A 16-bit register with 
+14 fractional bits, denoted Q1.14, can represent values from negative two to just 
+under two, with a resolution of roughly 0.00006 per step.
+
+As the number of fractional bits decreases, the set of representable values coarsens. 
+This quantization sets a hard floor. No algorithm can produce accuracy finer than the
+format itself allows.
+
+Fixed-point multiplication is worth pausing on. The product of two Q1.14 values
+requires a 28-bit intermediate result before truncation back to 16 bits. On an 8-bit
+AVR, that 16-by-16 multiply decomposes into four hardware MUL instructions plus a
+chain of additions. At 32-bit width, the decomposition requires sixteen MUL instructions. 
+The cost of multiplication grows quadratically with the number of limbs.
+
+
+III. THE LOOKUP TABLE
+
+The most direct approach is also the most memory-intensive. Precompute sine values
+at uniform angular intervals, store them in flash, and interpolate between neighbors
+at runtime. This works, and it is widely used, but it has two costs: the table itself
+consumes flash in proportion to the desired angular resolution, and the interpolation
+between entries still requires a multiply and a divide. On a part where both
+operations are expensive, the lookup table is viable but not free.
+
+
+IV. CORDIC
+
+CORDIC, the Coordinate Rotation Digital Computer, was developed by Jack Volder in 1959 
+for a navigation computer that could not multiply. The core insight is as follows: A 
+rotation  by an arbitrary angle can be decomposed into a sequence of successively smaller 
+rotations, each  chosen so that the tangent of the rotation angle is an exact power of two. 
+That constraint transforms what would ordinarily be a multiply into a bit shift.
+
+The algorithm initializes a vector along the x-axis and iteratively rotates it toward 
+the target angle. At each step, the sign of the residual angle determines the direction 
+of the next rotation: 
+If the residual is still positive, rotate forward. 
+if it has overshot, rotate back. 
+
+First, accuracy improves by approximately one bit per iteration. The convergence is
+linear, and the number of useful iterations is bounded by the number of fractional
+bits in the fixed-point format.
+
+Second, each pseudo-rotation slightly stretches the vector. The stretch factor for
+iteration i is the square root of one plus two to the negative two-i, and the product
+of all these factors across all iterations is a constant K, approximately 1.647. Here
+is what makes that useful: K does not depend on the target angle. Its reciprocal can
+be applied once as a prescale of the initial x value, eliminating any per-iteration
+multiply. The entire loop body is nothing but shifts and adds.
+
+One caveat that is frequently omitted: CORDIC still requires a small arctangent table, 
+one entry per iteration, stored in program memory. The table is far smaller than a 
+full sine lookup table though, as its length equals the number of fractional bits.
+
+
+V. POLYNOMIAL APPROXIMATION
+
+The alternative to iterative rotation is to approximate sine and cosine directly with
+a polynomial. The mathematical foundation for this is the Taylor series. Sine is an
+analytic function, which means that near any point, it is exactly equal to an infinite
+sum of terms built from its own derivatives at that point.
+
+Each term involves a higher power of x divided by a factorial. The series is infinite
+and converges everywhere, but for computation, we truncate it to a finite number of
+terms. The truncated polynomial is an approximation, but the approximation can be made 
+arbitrarily good for values near the expansion point by adding more terms.
+
+There is a practical constraint, though. Polynomials approximate well only on a
+bounded interval, and the Taylor series converges fastest near its expansion point.
+But angles can span zero to two pi. This is where argument reduction comes in.
+Sine and cosine have symmetries that allow any angle to be folded into the first 
+octant, the interval from zero to pi/4. Restricting the domain means fewer terms 
+are needed for a given accuracy.
+
+With the domain restricted, the polynomial can be evaluated efficiently using
+Horner's method. The naive approach computes each power of x independently, which
+wastes multiplications. Horner restructures the polynomial to nest the operations:
+
+  x * (1 + x^2 * (-1/6 + x^2 * (1/120 + ...)))
+
+Evaluated from the inside out, this requires exactly one multiply and one add per
+term. For a degree-n polynomial, that is n multiplies, optimal for any architecture
+with a fast multiplier.
+
+Now, there are two ways to choose the polynomial's coefficients, and the difference
+between them is consequential.
+
+Taylor coefficients come directly from the series expansion. They are closed-form
+expressions involving factorials: 1, -1/6, 1/120, and so on. They are easy to compute
+by hand and easy to verify. But they are optimized for accuracy at the origin,and 
+the approximation deteriorates as you move away from it.
+
+Minimax coefficients are constructed differently. Instead of anchoring accuracy at
+the origin, the Remez exchange algorithm finds coefficients that minimize the
+worst-case error across the entire interval. The resulting error curve does not ramp
+up at the edges. Instead, it equioscillates: the error ripples uniformly across the
+interval, never exceeding a certain bound. This is a consequence of the
+Chebyshev equioscillation theorem, which guarantees that the minimax polynomial
+is optimal in the max-norm sense.
+
+For a given number of terms, the minimax polynomial has a strictly smaller worst-case 
+error than the Taylor polynomial. Equivalently, it reaches a given accuracy target with 
+fewer terms. Fewer terms means fewer multiplies at runtime.
+
+The tradeoff is that minimax coefficients are not closed-form. They must be computed 
+offline by an iterative numerical algorithm, the Remez Algorithm. Once computed, they 
+are just constants embedded in the source code, no different from Taylor coefficients.
+
+Neither variant requires a lookup table. No angle table, no precomputed sine values.
+The coefficients are inline constants, and evaluation is a fixed sequence of multiplies
+and adds.
+
+
+VI. IMPLEMENTATION
+The fixed-point format is parameterized at compile time: TOTAL_BITS selects the
+backing integer type, and FRAC_BITS determines the binary point position. A
+host-side Python script generates the appropriate constants for each configuration.
+
+The CORDIC implementation is a straightforward loop. The initial vector is set to
+(1/K, 0), the residual angle z is initialized to the input, and each iteration applies 
+a conditional shift-add update to x, y, and z. 
+
+The polynomial implementation uses Horner evaluation over the squared argument.
+Sine uses an odd-polynomial form, cosine an even-polynomial form. The fixed-point
+multiply is inlined.
+
+One detail of implementation correctness that is easy to get wrong: the gain constant
+K must be computed for the exact number of iterations the firmware performs. The
+commonly cited asymptotic value of 1/K converges only as iterations approach infinity. 
+Using it for a finite iteration count introduces a systematic bias that is entirely avoidable.
+
+
+VII. MEASURED COMPARISON
+
+Three fixed-point configurations are measured on hardware: Q1.6 at 8-bit, Q1.14 at
+16-bit, and Q1.30 at 32-bit. These correspond to limb counts of one, two, and four.
+Cycle counts are captured via the ATxmega's TCC0 timer in stopwatch mode, with a
+width-dependent prescaler and a K-loop of 100 iterations to reduce quantization
+error.
+
+The results are presented in four plots. Consider each in turn.
+
+Cycles versus width shows the total cost per call. Minimax is fastest at every width.
+At 8-bit, where the hardware MUL handles the entire fixed-point multiply in one
+instruction, the polynomial methods run at roughly half the cost of CORDIC. At
+16-bit, both CORDIC and Taylor converge to around 1500 cycles, while minimax is 
+still quicker at 1200. By 32-bit, CORDIC is slowest.
+
+Accuracy versus fractional bits shows the maximum error in LSBs. Both polynomial
+methods land at plus or minus one LSB across all widths, limited only by the
+fixed-point truncation itself. CORDIC plateaus at four to five LSB,  a consequence
+of accumulated rounding through the shift-add iterations.
+
+Per-operation cost breaks the total into its components. Individual CORDIC
+iterations are cheaper at all widths, since an iteration is just shifts and 
+adds, while a polynomial term involves a multiply. By 32-bit, polynomial terms 
+have become expensive due to the costly 64-bit intermediate multiply. 
+
+CORDIC's total cost is still higher, and the operation count plot shows why:
+CORDIC iterations scale linearly with precision, while Polynomial term
+count grows much more slowly The iteration count keeps CORDIC's total cost high.
+
+VIII. WHAT THIS TELLS US
+
+These results are specific to the ATxmega128A1U, and that specificity is the point.
+CORDIC was designed for hardware that could only shift and add. On such a machine,
+every multiply in a polynomial evaluation would itself become an iterative shift-add
+loop, and CORDIC's avoidance of multiplication would be a real advantage. The
+ATxmega is not that machine. Its hardware MUL instruction executes in two clock
+cycles, making polynomial evaluation efficient in a way that was simply not possible
+on the hardware CORDIC was designed for.
+
+That does not make CORDIC a poor algorithm. It makes it a solution to a problem the
+ATxmega does not have. On an older microcontroller that lacks MUL entirely, you 
+would expect the ranking to look quite different. The value of CORDIC is architectural: 
+it trades away the need for multiplication, which is only advantageous when 
+multiplication is expensive.
+
+Among the polynomial methods, minimax is the stronger choice for production code.
+It achieves equivalent or better accuracy with fewer terms. Taylor's advantage is 
+purely pedagogical, it is easier to follow, and its coefficients come from a 
+formula you can derive on a whiteboard. The minimax coefficients require an
+offline computation via the Remez exchange algorithm, but once computed, they
+produce a strictly better approximation.
+
+The broader observation is that algorithm selection cannot be separated from
+hardware context. The same mathematical operation admits fundamentally different 
+optimal strategies depending on what the underlying silicon can do quickly. 
+Understanding that relationship between algorithm and architecture is a core skill 
+of embedded systems engineering.
