@@ -13,6 +13,23 @@ The tradeoff is measured, not argued: real firmware sweeps both algorithms acros
 fixed-point widths (Q8.6, Q16.14, Q32.30) and reports per-call cycle counts and error
 against a double-precision reference.
 
+## Results
+
+Measured on the ATxmega128A1U at 32 MHz, averaged across 7 test angles
+(timer-captured over 100-call loops; raw counter data in `data/*.csv`):
+
+| Format | CORDIC (cycles) | Taylor | Minimax | CORDIC max err (LSB) | Taylor | Minimax |
+|---|---|---|---|---|---|---|
+| Q8.6   | 410   | 282   | 202   | 4 | 1 | 1 |
+| Q16.14 | 1,488 | 1,537 | 1,215 | 4 | 1 | 1 |
+| Q32.30 | 9,419 | 5,345 | 4,218 | 5 | 1 | 1 |
+
+The story in two lines: CORDIC's shift-add iterations are cheap per step (~101 cycles at
+8-bit) but iteration count grows one-per-bit, and each iteration's shifts get more
+expensive as the word spans more limbs. The polynomial only adds ~2 terms per doubling of
+precision, so the hardware multiplier wins increasingly hard at wider formats — and
+equal-degree minimax beats Taylor on both cycles and worst-case error.
+
 ## Layout
 
 ```
